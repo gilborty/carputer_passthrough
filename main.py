@@ -51,10 +51,17 @@ def setup_serial_port():
 def send_vehicle_commands(old_steering, old_throttle, steering, throttle, port):
     """
         Sends steering and throttle to the kart 
+    
+	Steering: Full CC - CW
+		(180 - 0)
+	Throttle: Dead - Full - Brake
+		(92 - 180 - <90)
+		 
     """
+    # dm.print_info("S: {} T: {}".format(steering, throttle))
     # Steering
     if old_steering != steering:
-        steering_out = ('S%d\n' % steering).encode('ascii')
+        steering_out = ('S%d\n' % int(steering)).encode('ascii')
         port.write(steering_out)
         dm.print_warning("Write one {}".format(steering_out))
 
@@ -65,12 +72,13 @@ def send_vehicle_commands(old_steering, old_throttle, steering, throttle, port):
         else:
             throttle = min(throttle, 110)
           
-        throttle_out = ('D%d\n' % throttle).encode('ascii')
+        throttle_out = ('D%d\n' % int(throttle)).encode('ascii')
         port.write(throttle_out)
         dm.print_warning("Write two {}".format(throttle_out))
     port.flush()
 
 input_buffer = ''
+
 def process_inputs(steering, throttle, port):
 
     global input_buffer
@@ -85,13 +93,23 @@ def process_inputs(steering, throttle, port):
     # Init steering throttle and aux1
     steering = None
     throttle = None
-    aux1 = None
+    aux = None
 
     while '\n' in input_buffer:
         line, input_buffer = input_buffer.split('\n', 1)
-        print(line)
-    
-    return steering, throttle, aux1
+        payload = line.split(":")
+	if len(payload) > 1:
+		command = payload[0]
+		value = payload[1].split(";")[0]
+		
+		if command == "DI":
+			throttle = value
+		elif command == "SI":
+			steering = value
+		elif command == "AI":
+			aux = value
+	
+    return steering, throttle, aux
 
 def main():
     dm.print_info("Starting carputer passthrough")
@@ -117,7 +135,7 @@ def main():
         start = time.time()
 
         # Get the commanded input from the arduino
-        new_steering, new_throttle, new_aux = process_inputs(steering, throttle, aux, serial_port)
+        new_steering, new_throttle, new_aux = process_inputs(steering, throttle, serial_port)
 
         # Check for valid input
         if new_steering != None:
@@ -125,12 +143,12 @@ def main():
         if new_throttle != None:
             throttle = new_throttle
         if new_aux != None:
-            aux - new_aux
+            aux = new_aux
         
         dm.print_debug("S: {}, T: {}, aux: {}".format(steering, throttle, aux))
 
         # Simple passthrough
-        # send_vehicle_commands(steering_old, throttle_old, steering, throttle, serial_port)
+        send_vehicle_commands(steering_old, throttle_old, steering, throttle, serial_port)
 
         # Update the values
         aux_old = aux
