@@ -70,6 +70,28 @@ def send_vehicle_commands(old_steering, old_throttle, steering, throttle, port):
         dm.print_warning("Write two {}".format(throttle_out))
     port.flush()
 
+input_buffer = ''
+def process_inputs(steering, throttle, port):
+
+    global input_buffer
+    # Input is buffered because sometimes partial lines are read
+    try:
+        input_buffer += port.read(port.in_waiting).decode('ascii')
+    except UnicodeDecodeError:
+        # Bad data over serial port
+        input_buffer = ''
+        dm.print_warning("Serial port error for input port")
+    
+    # Init steering throttle and aux1
+    steering = None
+    throttle = None
+    aux1 = None
+
+    while '\n' in input_buffer:
+        line, input_buffer = input_buffer.split('\n', 1)
+        print(line)
+    
+    return steering, throttle, aux1
 
 def main():
     dm.print_info("Starting carputer passthrough")
@@ -108,7 +130,7 @@ def main():
         dm.print_debug("S: {}, T: {}, aux: {}".format(steering, throttle, aux))
 
         # Simple passthrough
-        send_vehicle_commands(steering_old, throttle_old, steering, throttle, serial_port)
+        # send_vehicle_commands(steering_old, throttle_old, steering, throttle, serial_port)
 
         # Update the values
         aux_old = aux
