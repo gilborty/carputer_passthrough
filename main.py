@@ -4,7 +4,7 @@ import serial
 import signal
 import sys
 import time
-
+import re
 import config as cfg
 
 # Pretty print for debug messages
@@ -30,19 +30,15 @@ def rate_limit(start, rate=0.5):
         time.sleep(sleep_for)
 
 def setup_serial_ports():
-    try:
-        port_in = serial.Serial(port=cfg.port_in_name,
+
+    port_in = serial.Serial(port=cfg.port_in,
                             baudrate= cfg.port_in_baud,
                             timeout=0.0)
-
-        port_out = serial.Serial(port=cfg.port_out_name,
+	
+    port_out = serial.Serial(port=cfg.port_out,
                             baudrate= cfg.port_out_baud,
                             timeout=0.0)
     
-    except:
-        dm.print_fatal("Could not open serial ports")
-        sys.exit(-1)
-
     port_in.flush()
     port_out.flush()
 
@@ -64,7 +60,6 @@ def send_vehicle_commands(old_steering, old_throttle, steering, throttle, port):
     if old_steering != steering:
         steering_out = ('S%d\n' % int(steering)).encode('ascii')
         port.write(steering_out)
-        dm.print_warning("Write one {}".format(steering_out))
 
     # Clamp throttle
     if old_throttle != throttle:
@@ -74,14 +69,14 @@ def send_vehicle_commands(old_steering, old_throttle, steering, throttle, port):
             throttle = min(throttle, 110)
           
         throttle_out = ('D%d\n' % int(throttle)).encode('ascii')
-        port.write(throttle_out)
-        dm.print_warning("Write two {}".format(throttle_out))
-
+	port.write(throttle_out)
     port.flush()
 
 buffer_in =''
 buffer_out = ''
-
+button_arduino_in = 0
+button_arduino_out = 0
+odometer_ticks=0
 def process_input(port_in, port_out):
 	"""Reads steering, throttle, aux1 and button data reported from the arduinos.
 	Returns: (steering, throttle, button_arduino_in, button_arduino_out)
@@ -106,6 +101,7 @@ def process_input(port_in, port_out):
 	while '\n' in buffer_in:
 		line, buffer_in = buffer_in.split('\n', 1)
 		match = re.search(r'(\d+) (\d+) (\d+)', line)
+		
 		if match:
 			steering = int(match.group(1))
 			throttle = int(match.group(2))
@@ -149,7 +145,7 @@ def main():
         start = time.time()
 
         # Get the commanded input from the arduino
-        new_steering, new_throttle, new_aux, _ = process_input(port_in, port_out)
+        new_steering, new_throttle, new_aux, b1, b2 = process_input(port_in, port_out)
 
         # Check for valid input
         if new_steering != None:
