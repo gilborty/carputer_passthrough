@@ -29,24 +29,25 @@ def rate_limit(start, rate=0.5):
     if sleep_for > delta:
         time.sleep(sleep_for)
 
-def setup_serial_port():
-
-    dm.print_info("Using serial port {}".format(cfg.serial_port_name))
-    dm.print_info("With baudrate {}".format(cfg.serial_port_baudrate))
-
+def setup_serial_ports():
     try:
-        port = serial.Serial(port=cfg.serial_port_name,
-                            baudrate= cfg.serial_port_baudrate,
+        port_in = serial.Serial(port=cfg.port_in_name,
+                            baudrate= cfg.port_in_baud,
+                            timeout=0.0)
+
+        port_out = serial.Serial(port=cfg.port_out_name,
+                            baudrate= cfg.port_out_baud,
                             timeout=0.0)
     
     except:
-        dm.print_fatal("Could not open serial port {} with baudrate {}".format(cfg.serial_port_name, cfg.serial_port_baudrate))
+        dm.print_fatal("Could not open serial ports")
         sys.exit(-1)
 
-    port.flush()
+    port_in.flush()
+    port_out.flush()
 
     dm.print_info("Serial port ready")
-    return port
+    return port_in, port_out
 
 def send_vehicle_commands(old_steering, old_throttle, steering, throttle, port):
     """
@@ -75,48 +76,61 @@ def send_vehicle_commands(old_steering, old_throttle, steering, throttle, port):
         throttle_out = ('D%d\n' % int(throttle)).encode('ascii')
         port.write(throttle_out)
         dm.print_warning("Write two {}".format(throttle_out))
+
     port.flush()
 
-input_buffer = ''
+buffer_in =''
+buffer_out = ''
 
-def process_inputs(steering, throttle, port):
-
-    global input_buffer
-    # Input is buffered because sometimes partial lines are read
-    try:
-        input_buffer += port.read(port.in_waiting).decode('ascii')
-    except UnicodeDecodeError:
-        # Bad data over serial port
-        input_buffer = ''
-        dm.print_warning("Serial port error for input port")
-    
-    # Init steering throttle and aux1
-    steering = None
-    throttle = None
-    aux = None
-
-    while '\n' in input_buffer:
-        line, input_buffer = input_buffer.split('\n', 1)
-        payload = line.split(":")
-	if len(payload) > 1:
-		command = payload[0]
-		value = payload[1].split(";")[0]
-		
-		if command == "DI":
-			throttle = value
-		elif command == "SI":
-			steering = value
-		elif command == "AI":
-			aux = value
-	
-    return steering, throttle, aux
+def process_input(port_in, port_out):
+	"""Reads steering, throttle, aux1 and button data reported from the arduinos.
+	Returns: (steering, throttle, button_arduino_in, button_arduino_out)
+	Return values may be None if the data from the arduino isn't related to the
+	steering or throttle.
+	"""
+	# Input is buffered because sometimes partial lines are read
+	global button_arduino_in, button_arduino_out, buffer_in, buffer_out, odometer_ticks, milliseconds
+	try:
+		buffer_in += port_in.read(port_in.in_waiting).decode('ascii')
+		buffer_out += port_out.read(port_out.in_waiting).decode('ascii')
+	except UnicodeDecodeError:
+		# We can rarely get bad data over the serial port. The error looks like this:
+		# buffer_in += port_in.read(port_in.in_waiting).decode('ascii')
+		# UnicodeDecodeError: 'ascii' codec can't decode byte 0xf0 in position 0: ordinal not in range(128)
+		buffer_in = ''
+		buffer_out = ''
+		dm.print_warning("Mysterious serial port error. Let's pretend it didn't happen. :)")
+	# Init steering, throttle and aux1.
+	steering, throttle, aux1 = None, None, None
+	# Read lines from input Arduino
+	while '\n' in buffer_in:
+		line, buffer_in = buffer_in.split('\n', 1)
+		match = re.search(r'(\d+) (\d+) (\d+)', line)
+		if match:
+			steering = int(match.group(1))
+			throttle = int(match.group(2))
+			aux1 = int(match.group(3))
+		if line[0:1] == 'S':
+			# This is just a toggle button
+			button_arduino_in = 1 - button_arduino_in
+	# Read lines from output Arduino
+	while '\n' in buffer_out:
+		line, buffer_out = buffer_out.split('\n', 1)
+		if line[0:3] == 'Mil':
+			sp = line.split('\t')
+			milliseconds = int(sp[1])
+			odometer_ticks += 1
+		if line[0:6] == 'Button':
+			sp = line.split('\t')
+			button_arduino_out = int(sp[1])
+	return steering, throttle, aux1, button_arduino_in, button_arduino_out
 
 def main():
     dm.print_info("Starting carputer passthrough")
 
     dm.print_info("Setting up serial ports")
 
-    serial_port = setup_serial_port()
+    port_in, port_out = setup_serial_ports()
 
     # Init values
     steering = 0
@@ -135,7 +149,7 @@ def main():
         start = time.time()
 
         # Get the commanded input from the arduino
-        new_steering, new_throttle, new_aux = process_inputs(steering, throttle, serial_port)
+        new_steering, new_throttle, new_aux, _ = process_input(port_in, port_out)
 
         # Check for valid input
         if new_steering != None:
@@ -148,7 +162,7 @@ def main():
         dm.print_debug("S: {}, T: {}, aux: {}".format(steering, throttle, aux))
 
         # Simple passthrough
-        send_vehicle_commands(steering_old, throttle_old, steering, throttle, serial_port)
+        send_vehicle_commands(steering_old, throttle_old, steering, throttle, port_out)
 
         # Update the values
         aux_old = aux
