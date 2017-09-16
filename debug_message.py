@@ -26,13 +26,9 @@ MAX_LOG_FILE_SIZE_MB = 2
 class DebugMessage(object):
     """A pretty print class for debug messages"""
 
-    def __init__(self, verbose=True, enable_logging=False, logging_file="./.battery_flasher.log"):
+    def __init__(self, verbose=True, enable_logging=False):
         self.verbose = verbose
         self.enable_logging = enable_logging
-        self.logging_file = logging_file
-
-        if self.enable_logging:
-            self.init_logging()
 
     def get_current_time(self):
         """
@@ -42,13 +38,14 @@ class DebugMessage(object):
         """
         return ConsoleColors.BOLD + str(datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]) + ConsoleColors.ENDC
 
-    def init_logging(self):
+    def init_logging(self, logging_file):
+        self.logging_file = logging_file
         self.print_info("Logging to file enabled")
         self.print_info("Logging to {}".format(self.logging_file))
 
-        self.logger = logging.getLogger('battery_flasher')
+        self.logger = logging.getLogger('carputer')
         self.logging_handler = RotatingFileHandler(self.logging_file, maxBytes=MAX_LOG_FILE_SIZE_MB*1024*1024)
-        self.formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+        self.formatter = logging.Formatter('%(asctime)s %(message)s')
 
         self.logging_handler.setFormatter(self.formatter)
         self.logger.addHandler(self.logging_handler)
@@ -105,4 +102,5 @@ class DebugMessage(object):
         self.logger.warning(message)
     def log_error(self, message=""):
         self.logger.error(message)
-    
+    def log_data(self, data=""):
+        self.logger.info(data)
